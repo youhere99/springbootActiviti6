@@ -1,0 +1,30 @@
+logging:
+    level:
+        com:
+            activiti6:
+                www:
+                    workflow: info
+        root: debug
+server:
+    port: 8080
+    servlet:
+        context-path: /
+spring:
+    activiti:
+        check-process-definitions: false
+        history-level: full
+        db-identity-used: false
+        database-schema-update: false
+    datasource:
+        driver-class-name: com.mysql.jdbc.Driver
+        password: root
+        url: jdbc:mysql://192.168.200.76:3306/activiti?characterEncoding=utf8&useSSL=false&nullCatalogMeansCurrent=true
+        username: 123456
+    thymeleaf:
+        cache: false
+        check-template-location: true
+        enabled: true
+        content-type: text/html
+        mode: LEGACYHTML5
+        prefix: classpath:/static/
+        suffix: .html
