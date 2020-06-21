@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
-import org.activiti.bpmn.model.BpmnModel;
+import org.activiti.bpmn.model.*;
 import org.activiti.editor.constants.ModelDataJsonConstants;
 import org.activiti.editor.language.json.converter.BpmnJsonConverter;
 import org.activiti.engine.HistoryService;
@@ -13,11 +13,14 @@ import org.activiti.engine.RepositoryService;
 import org.activiti.engine.RuntimeService;
 import org.activiti.engine.history.HistoricActivityInstance;
 import org.activiti.engine.history.HistoricProcessInstance;
-import org.activiti.engine.identity.Group;
+import org.activiti.engine.history.HistoricTaskInstance;
 import org.activiti.engine.impl.persistence.entity.ProcessDefinitionEntity;
 import org.activiti.engine.repository.Deployment;
 import org.activiti.engine.repository.Model;
 import org.activiti.engine.repository.ModelQuery;
+import org.activiti.engine.repository.ProcessDefinition;
+import org.activiti.engine.runtime.Execution;
+import org.activiti.engine.runtime.ExecutionQuery;
 import org.activiti.engine.runtime.ProcessInstance;
 import org.activiti.image.ProcessDiagramGenerator;
 import org.activiti.image.impl.DefaultProcessDiagramGenerator;
@@ -57,6 +60,7 @@ public class ModelerController {
     private HistoryService historyService;
     @Resource
     private RuntimeService runtimeService;
+
 
 
     /**
@@ -116,7 +120,7 @@ public class ModelerController {
     }
 
     /**
-     * 发布流程
+     * 发布模型
      *
      * @param modelId 模型ID
      * @return
@@ -153,6 +157,7 @@ public class ModelerController {
 
     /**
      * 模型列表
+     *
      * @return
      */
     @ResponseBody
@@ -165,6 +170,14 @@ public class ModelerController {
         page.setRows(models);
         page.setTotal(count);
         return page;
+    }
+
+    @ResponseBody
+    @RequestMapping("/process/start/{processDefinitionId}")
+    public void startProcess(@PathVariable("processDefinitionId") String processDefinitionId) {
+        ProcessInstance processInstance = runtimeService.startProcessInstanceById(processDefinitionId);
+        System.out.println("成功启动了流程：" + processInstance.getId());
+
     }
 
     /**
@@ -297,7 +310,45 @@ public class ModelerController {
 
     }
 
+    /**
+     * 获取当前流程的下一个节点
+     *  @param taskId
+     * @param executionId
+     * @param processInstanceId
+     * @return
+     */
+    @ResponseBody
+    @GetMapping(value = "nextNode")
+    public UserTask nextNode(String taskId, String executionId, String processInstanceId) {
+
+        ExecutionQuery executionQuery = runtimeService.createExecutionQuery().executionId(executionId);
+        Execution execution = executionQuery.singleResult();
+        String activityId = execution.getActivityId();
+        // 取得已提交的任务
+        HistoricTaskInstance historicTaskInstance = historyService.createHistoricTaskInstanceQuery()
+                .taskId(taskId).singleResult();
+        ProcessDefinition processDefinition =repositoryService.createProcessDefinitionQuery().processDefinitionKey("processA").latestVersion().singleResult();
+        //获得当前流程的活动ID
+         processDefinition = repositoryService.getProcessDefinition(historicTaskInstance.getProcessDefinitionId());
+        UserTask userTask = null;
+        //根据活动节点获取当前的组件信息
+        BpmnModel bpmnModel = repositoryService.getBpmnModel(processDefinition.getId());
+        FlowNode flowNode = (FlowNode) bpmnModel.getMainProcess().getFlowElement(activityId);
+        //获取该流程组件的之后/之前的组件信息
+        List<SequenceFlow> sequenceFlowListOutGoing = flowNode.getOutgoingFlows();
+        log.info("节点信息--", sequenceFlowListOutGoing);
+        List<SequenceFlow> sequenceFlowListIncoming=flowNode.getIncomingFlows();
+        for (SequenceFlow sequenceFlow : sequenceFlowListOutGoing) {
+            //获取的下个节点不一定是userTask的任务节点，所以要判断是否是任务节点
+            FlowElement flowElement = sequenceFlow.getTargetFlowElement();
+            if (flowElement instanceof UserTask) {
+                userTask = (UserTask) flowElement;
+                break;
+            }
 
 
+        }
+        return userTask;
+    }
 
 }
