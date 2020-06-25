@@ -158,7 +158,7 @@ var KisBpmAssignmentPopupCtrl = [ '$scope','$http', function($scope,$http) {
 	$scope.selectTitle = '选择代理人';
 	$scope.columnData = [];//表格列数据
 	$scope.columnDataName = 'columnData';
-	$scope.selectType = 2;//0-代理人，1-候选人，2-候选组
+	$scope.selectType = 0;//0-代理人，1-候选人，2-候选组
 	$scope.totalServerItems = 0;//表格总条数
 	//分页初始化
 	$scope.pagingOptions = {
@@ -241,9 +241,9 @@ var KisBpmAssignmentPopupCtrl = [ '$scope','$http', function($scope,$http) {
 				var obj = {value: $scope.getGroupData(event.entity)};
 				$scope.assignment.candidateGroups=[];
 				$scope.assignment.candidateGroups.push(obj);
-				// if(!array_contain($scope.assignment.candidateGroups, obj.value)){
-				// 	$scope.assignment.candidateGroups.push(obj);
-				// }
+				if(!array_contain($scope.assignment.candidateGroups, obj.value)){
+					$scope.assignment.candidateGroups.push(obj);
+				}
 			}
 			return true;
 		}

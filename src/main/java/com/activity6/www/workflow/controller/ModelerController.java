@@ -1,9 +1,12 @@
 package com.activity6.www.workflow.controller;
 
+import com.activity6.www.workflow.common.JumpAnyWhereCmd;
 import com.activity6.www.workflow.common.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import de.odysseus.el.ExpressionFactoryImpl;
+import de.odysseus.el.util.SimpleContext;
 import lombok.extern.slf4j.Slf4j;
 import org.activiti.bpmn.model.*;
 import org.activiti.editor.constants.ModelDataJsonConstants;
@@ -11,19 +14,26 @@ import org.activiti.editor.language.json.converter.BpmnJsonConverter;
 import org.activiti.engine.HistoryService;
 import org.activiti.engine.RepositoryService;
 import org.activiti.engine.RuntimeService;
+import org.activiti.engine.TaskService;
 import org.activiti.engine.history.HistoricActivityInstance;
 import org.activiti.engine.history.HistoricProcessInstance;
-import org.activiti.engine.history.HistoricTaskInstance;
+import org.activiti.engine.impl.TaskServiceImpl;
+import org.activiti.engine.impl.context.Context;
+import org.activiti.engine.impl.interceptor.CommandContext;
+import org.activiti.engine.impl.interceptor.CommandExecutor;
+import org.activiti.engine.impl.persistence.entity.ExecutionEntity;
+import org.activiti.engine.impl.persistence.entity.ExecutionEntityManager;
 import org.activiti.engine.impl.persistence.entity.ProcessDefinitionEntity;
+import org.activiti.engine.impl.persistence.entity.TaskEntityManager;
 import org.activiti.engine.repository.Deployment;
 import org.activiti.engine.repository.Model;
 import org.activiti.engine.repository.ModelQuery;
-import org.activiti.engine.repository.ProcessDefinition;
 import org.activiti.engine.runtime.Execution;
-import org.activiti.engine.runtime.ExecutionQuery;
 import org.activiti.engine.runtime.ProcessInstance;
+import org.activiti.engine.task.Task;
 import org.activiti.image.ProcessDiagramGenerator;
 import org.activiti.image.impl.DefaultProcessDiagramGenerator;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -34,6 +44,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 
 import javax.annotation.Resource;
+import javax.el.ExpressionFactory;
+import javax.el.ValueExpression;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.InputStream;
@@ -60,7 +72,11 @@ public class ModelerController {
     private HistoryService historyService;
     @Resource
     private RuntimeService runtimeService;
+    @Resource
+    private TaskService taskService;
 
+    @Resource
+    private TaskEntityManager taskEntityManager;
 
 
     /**
@@ -95,6 +111,7 @@ public class ModelerController {
         createObjectNode(model.getId());
         response.sendRedirect("editor?modelId=" + model.getId());
         logger.info("创建模型结束，返回模型ID：{}", model.getId());
+
     }
 
     /**
@@ -173,11 +190,34 @@ public class ModelerController {
     }
 
     @ResponseBody
-    @RequestMapping("/process/start/{processDefinitionId}")
-    public void startProcess(@PathVariable("processDefinitionId") String processDefinitionId) {
+    @RequestMapping("/start/{processDefinitionId}")
+    public String start(@PathVariable("processDefinitionId") String processDefinitionId) {
         ProcessInstance processInstance = runtimeService.startProcessInstanceById(processDefinitionId);
-        System.out.println("成功启动了流程：" + processInstance.getId());
+        return "success";
+    }
 
+    @ResponseBody
+    @RequestMapping("/complate/{taskId}/{var}")
+    public String complate(@PathVariable("taskId") String taskId,@PathVariable("var") String var) {
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("isAgree",var);
+        taskService.complete(taskId,vars);
+        return "success";
+    }
+
+    @ResponseBody
+    @RequestMapping("/free/{taskId}/{nodeId}")
+    public String free(@PathVariable("taskId") String taskId, @PathVariable("nodeId") String nodeId) {
+        if (StringUtils.isBlank(nodeId)) {
+            Task task = taskService.createTaskQuery().taskId(taskId).singleResult();
+            BpmnModel bpmnModel = repositoryService.getBpmnModel(task.getProcessDefinitionId());
+            FlowNode flowNode = (FlowNode) bpmnModel.getFlowElement(task.getTaskDefinitionKey());
+            List<SequenceFlow> incomingFlows = flowNode.getIncomingFlows();
+            nodeId = incomingFlows.get(0).getSourceFlowElement().getId();
+        }
+        CommandExecutor commandExecutor = ((TaskServiceImpl) taskService).getCommandExecutor();
+        commandExecutor.execute(new JumpAnyWhereCmd(taskId, nodeId, "reason"));
+        return "success";
     }
 
     /**
@@ -311,39 +351,57 @@ public class ModelerController {
     }
 
     /**
-     * 获取当前流程的下一个节点
-     *  @param taskId
-     * @param executionId
-     * @param processInstanceId
+     * 获取当前流程的上节点/下节点
+     *
+     * @param taskId
      * @return
      */
     @ResponseBody
     @GetMapping(value = "nextNode")
-    public UserTask nextNode(String taskId, String executionId, String processInstanceId) {
-
-        ExecutionQuery executionQuery = runtimeService.createExecutionQuery().executionId(executionId);
-        Execution execution = executionQuery.singleResult();
+    public UserTask nextNode(String taskId,String var) {
+        Map<String, Object> vars = new HashMap<>();
+        vars.put("isAgree",var);
+        //任务
+        Task task = taskService.createTaskQuery().taskId(taskId).singleResult();
+        //当前执行流程任务
+        Execution execution = runtimeService.createExecutionQuery().executionId(task.getExecutionId()).singleResult();
+        //当前活动节点
         String activityId = execution.getActivityId();
         // 取得已提交的任务
-        HistoricTaskInstance historicTaskInstance = historyService.createHistoricTaskInstanceQuery()
-                .taskId(taskId).singleResult();
-        ProcessDefinition processDefinition =repositoryService.createProcessDefinitionQuery().processDefinitionKey("processA").latestVersion().singleResult();
+//        HistoricTaskInstance historicTaskInstance = historyService.createHistoricTaskInstanceQuery()
+//                .taskId(taskId).singleResult();
+//        ProcessDefinition processDefinition =repositoryService.createProcessDefinitionQuery().processDefinitionKey("processA").latestVersion().singleResult();
         //获得当前流程的活动ID
-         processDefinition = repositoryService.getProcessDefinition(historicTaskInstance.getProcessDefinitionId());
+//         processDefinition = repositoryService.getProcessDefinition(historicTaskInstance.getProcessDefinitionId());
+
         UserTask userTask = null;
         //根据活动节点获取当前的组件信息
-        BpmnModel bpmnModel = repositoryService.getBpmnModel(processDefinition.getId());
-        FlowNode flowNode = (FlowNode) bpmnModel.getMainProcess().getFlowElement(activityId);
-        //获取该流程组件的之后/之前的组件信息
-        List<SequenceFlow> sequenceFlowListOutGoing = flowNode.getOutgoingFlows();
-        log.info("节点信息--", sequenceFlowListOutGoing);
-        List<SequenceFlow> sequenceFlowListIncoming=flowNode.getIncomingFlows();
-        for (SequenceFlow sequenceFlow : sequenceFlowListOutGoing) {
+        BpmnModel bpmnModel = repositoryService.getBpmnModel(task.getProcessDefinitionId());
+        FlowNode flowNode = (FlowNode) bpmnModel.getFlowElement(activityId);
+        System.out.println("flowNode1--" + flowNode);
+        flowNode = (FlowNode) bpmnModel.getMainProcess().getFlowElement(activityId);
+        System.out.println("flowNode2--" + flowNode);
+        //获取该流程组件的之后/
+        List<SequenceFlow> outgoingFlows = flowNode.getOutgoingFlows();
+        for (SequenceFlow sequenceFlow : outgoingFlows) {
             //获取的下个节点不一定是userTask的任务节点，所以要判断是否是任务节点
             FlowElement flowElement = sequenceFlow.getTargetFlowElement();
             if (flowElement instanceof UserTask) {
                 userTask = (UserTask) flowElement;
-                break;
+//                flowNode = (FlowNode) flowElement;
+                String conditionExpression = sequenceFlow.getConditionExpression();
+                boolean condition = isCondition(conditionExpression, vars);
+                System.out.println(condition);
+            }
+        }
+
+        //之前的组件信息
+        List<SequenceFlow> incomingFlows = flowNode.getIncomingFlows();
+        for (SequenceFlow sequenceFlow : incomingFlows) {
+            //获取的下个节点不一定是userTask的任务节点，所以要判断是否是任务节点
+            FlowElement flowElement = sequenceFlow.getSourceFlowElement();
+            if (flowElement instanceof UserTask) {
+                userTask = (UserTask) flowElement;
             }
 
 
@@ -351,4 +409,24 @@ public class ModelerController {
         return userTask;
     }
 
+
+    /**
+     * 根据key和value判断el表达式是否通过信息
+     * @return
+     */
+    public boolean isCondition(String el,Map<String, Object> vars) {
+        if(vars==null||vars.isEmpty()){
+            return  true;
+        }
+        ExpressionFactory factory = new ExpressionFactoryImpl();
+        SimpleContext context = new SimpleContext();
+        for (Object k : vars.keySet()) {
+            if (vars.get(k) != null) {
+                context.setVariable(k.toString(), factory.createValueExpression(vars.get(k), vars.get(k).getClass()));
+            }
+        }
+
+        ValueExpression e = factory.createValueExpression(context, el, Boolean.class);
+        return (Boolean) e.getValue(context);
+    }
 }
