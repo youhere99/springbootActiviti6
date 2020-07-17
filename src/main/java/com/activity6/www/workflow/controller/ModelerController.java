@@ -75,8 +75,8 @@ public class ModelerController {
     @Resource
     private TaskService taskService;
 
-    @Resource
-    private TaskEntityManager taskEntityManager;
+//    @Resource
+//    private TaskEntityManager taskEntityManager;
 
 
     /**
