@@ -358,9 +358,9 @@ public class ModelerController {
      */
     @ResponseBody
     @GetMapping(value = "nextNode")
-    public UserTask nextNode(String taskId,String var) {
+    public List<FlowNode> nextNode(String taskId,String var) {
         Map<String, Object> vars = new HashMap<>();
-        vars.put("isAgree",var);
+//        vars.put("isAgree",var);
         //任务
         Task task = taskService.createTaskQuery().taskId(taskId).singleResult();
         //当前执行流程任务
@@ -383,16 +383,22 @@ public class ModelerController {
         System.out.println("flowNode2--" + flowNode);
         //获取该流程组件的之后/
         List<SequenceFlow> outgoingFlows = flowNode.getOutgoingFlows();
+        List<FlowNode> flowElements = new ArrayList<>();
         for (SequenceFlow sequenceFlow : outgoingFlows) {
             //获取的下个节点不一定是userTask的任务节点，所以要判断是否是任务节点
             FlowElement flowElement = sequenceFlow.getTargetFlowElement();
-            if (flowElement instanceof UserTask) {
-                userTask = (UserTask) flowElement;
+//            if (flowElement instanceof UserTask) {
+//                userTask = (UserTask) flowElement;
 //                flowNode = (FlowNode) flowElement;
                 String conditionExpression = sequenceFlow.getConditionExpression();
                 boolean condition = isCondition(conditionExpression, vars);
-                System.out.println(condition);
-            }
+                if(condition){
+                    flowNode  = (FlowNode)flowElement;
+                    flowNode.getIncomingFlows().clear();
+                    flowNode.getOutgoingFlows().clear();
+                    flowElements.add(flowNode);
+                }
+//            }
         }
 
         //之前的组件信息
@@ -406,7 +412,7 @@ public class ModelerController {
 
 
         }
-        return userTask;
+        return flowElements;
     }
 
 
