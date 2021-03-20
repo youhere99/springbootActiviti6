@@ -2,11 +2,13 @@ package com.activity6.www.workflow.controller;
 
 import com.activity6.www.workflow.common.JumpAnyWhereCmd;
 import com.activity6.www.workflow.common.Page;
+import com.activity6.www.workflow.common.ResponseData;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import de.odysseus.el.ExpressionFactoryImpl;
 import de.odysseus.el.util.SimpleContext;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.activiti.bpmn.model.*;
 import org.activiti.editor.constants.ModelDataJsonConstants;
@@ -34,21 +36,29 @@ import org.activiti.engine.task.Task;
 import org.activiti.image.ProcessDiagramGenerator;
 import org.activiti.image.impl.DefaultProcessDiagramGenerator;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.ibatis.jdbc.ScriptRunner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.lob.DefaultLobHandler;
+import org.springframework.jdbc.support.lob.LobHandler;
 import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.util.Assert;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.Resource;
 import javax.el.ExpressionFactory;
 import javax.el.ValueExpression;
+import javax.servlet.ServletOutputStream;
+import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
+import java.net.URLEncoder;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -64,6 +74,8 @@ public class ModelerController {
 
     private static final Logger logger = LoggerFactory.getLogger(ModelerController.class);
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
     @Resource
     private RepositoryService repositoryService;
     @Resource
@@ -435,4 +447,114 @@ public class ModelerController {
         ValueExpression e = factory.createValueExpression(context, el, Boolean.class);
         return (Boolean) e.getValue(context);
     }
+
+
+   //导入流程
+   @SneakyThrows
+    @PostMapping(value = "/importResource")
+    public ResponseData importResource(@RequestPart(value = "file") MultipartFile file, String flag, String flowId)  {
+        Assert.notNull(flag, "标识不能为空！");
+        StringBuilder sbr = new StringBuilder();
+        try (InputStream inputStream = file.getInputStream();
+             InputStreamReader ips = new InputStreamReader(inputStream);
+             BufferedReader reader = new BufferedReader(ips)) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sbr.append(line);
+            }
+        }
+        if ("1".equals(flag)){
+            ScriptRunner runner = new ScriptRunner(jdbcTemplate.getDataSource().getConnection());
+            runner.setAutoCommit(true);
+            runner.setStopOnError(true);
+            runner.setEscapeProcessing(false);
+            runner.setSendFullScript(true);
+            String scriptStr = sbr.toString().replace("nullFlowId", flowId);
+            //替换脚本中的flowId
+            ByteArrayInputStream inputStream = new ByteArrayInputStream(scriptStr.getBytes());
+            runner.runScript(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
+            return ResponseData.ok("导入成功");
+        }
+        if("2".equals(flag)){
+            //解析脚本内容，返回JSON
+            String[] split = sbr.toString().split("\\('");
+            String hexStr = split[1].split("'\\)")[0];
+            String str = "0123456789ABCDEF";
+
+            char[] hexs = hexStr.toCharArray();
+            byte[] bytes = new byte[hexStr.length() / 2];
+            int n;
+            for (int i = 0; i < bytes.length; i++) {
+                n = str.indexOf(hexs[2 * i]) * 16;
+                n += str.indexOf(hexs[2 * i + 1]);
+                bytes[i] = (byte) (n & 0xff);
+            }
+            String resultJson = new String(bytes);
+            return ResponseData.ok(resultJson);
+        }
+        return ResponseData.ok();
+    }
+
+    //导出流程
+    @SneakyThrows
+    @GetMapping(value = "/exportScript")
+    public void nextNode(String flowId, HttpServletRequest request, HttpServletResponse response) {
+        String modelSql = "SELECT * FROM ACT_GE_BYTEARRAY WHERE ID_ in (SELECT EDITOR_SOURCE_VALUE_ID_ FROM ACT_RE_MODEL where ID_= ?)";
+        List<Map<String, String>> query = jdbcTemplate.query(modelSql, new Object[]{flowId}, (resultSet, i) -> {
+            final LobHandler lobHandler = new DefaultLobHandler();
+            byte[] blobAsBytes = lobHandler.getBlobAsBytes(resultSet, 5);
+            String bytes = new String(blobAsBytes);
+            HashMap<String, String> map = new HashMap<>(6);
+            map.put("ID_", resultSet.getString(1));
+            map.put("REV_", resultSet.getString(2));
+            map.put("NAME_", resultSet.getString(3));
+            map.put("DEPLOYMENT_ID_", resultSet.getString(4));
+            map.put("BYTES_", bytes);
+            map.put("GENERATED_", resultSet.getString(6));
+            return map;
+        });
+        Map<String, String> map = query.get(0);
+        //输出脚本使用hex字符
+        String bytes = map.get("BYTES_");
+        char[] chars = "0123456789ABCDEF".toCharArray();
+        byte[] bs = bytes.getBytes();
+        StringBuilder sb = new StringBuilder();
+        int bit;
+        for (int i = 0; i < bs.length; i++) {
+            bit = (bs[i] & 0X0F0) >> 4;
+            sb.append(chars[bit]);
+            bit = bs[i] & 0X0F;
+            sb.append(chars[bit]);
+        }
+        String deployment_id_ = map.get("DEPLOYMENT_ID_");
+        String fileName = map.get("NAME_");
+        String scriptBase = "DECLARE\n" +
+                "    v_blob BLOB;\n" +
+                "BEGIN\n" +
+                "    v_blob :=HEXTORAW('v5');\n" +
+                "\n" +
+                "    INSERT INTO \"AML_PLATFORM\".\"ACT_GE_BYTEARRAY\"(\"ID_\", \"REV_\", \"NAME_\", \"DEPLOYMENT_ID_\", \"BYTES_\", \"GENERATED_\")\n" +
+                "    values ('v1', 'v2', 'v3', 'v4', v_blob, 'v6');\n" +
+                "end;";
+        String generated_ = map.get("GENERATED_");
+        String rev_ = map.get("REV_");
+        String replace = scriptBase.replace("v1", map.get("ID_"))
+                .replace("v2", rev_ == null ? "" : rev_)
+                .replace("v3", fileName == null ? "" : fileName)
+                .replace("v4", deployment_id_ == null ? "nullFlowId" : "nullFlowId")
+                .replace("v5", sb.toString())
+                .replace("v6", generated_ == null ? "" : generated_);
+        byte[] baseBytes = replace.getBytes(Charset.forName("UTF-8"));
+        if (request.getHeader("User-Agent").toLowerCase().indexOf("msie") > 0 || request.getHeader("User-Agent").indexOf("like Gecko") > 0) {
+            //IE浏览器
+            fileName = URLEncoder.encode(fileName, "UTF-8");
+        } else {
+            fileName = new String(fileName.getBytes("UTF-8"), "iso-8859-1");
+        }
+        response.setCharacterEncoding("utf-8");
+        response.setHeader("Content-disposition", "attachment;filename=" + fileName + ".sql");
+        ServletOutputStream ops = response.getOutputStream();
+        ops.write(baseBytes);
+    }
+
 }
