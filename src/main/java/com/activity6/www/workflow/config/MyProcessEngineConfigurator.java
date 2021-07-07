@@ -5,10 +5,13 @@ import org.activiti.spring.SpringProcessEngineConfiguration;
 import org.activiti.spring.boot.ActivitiProperties;
 import org.activiti.spring.boot.DataSourceProcessEngineAutoConfiguration;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.ResourcePatternResolver;
+import org.springframework.jdbc.support.lob.DefaultLobHandler;
+import org.springframework.jdbc.support.lob.LobHandler;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.util.StringUtils;
 
@@ -43,6 +46,13 @@ public class MyProcessEngineConfigurator {
     
     @Autowired
     private SpringProcessEngineConfiguration springProcessEngineConfiguration;
+
+
+    @Bean
+    @ConditionalOnMissingBean
+    public LobHandler lobHandler() {
+        return new DefaultLobHandler();
+    }
 
    @PostConstruct
    public void processEngineConfigurationImpl(){
