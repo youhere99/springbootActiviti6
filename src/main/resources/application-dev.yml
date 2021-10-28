@@ -1,0 +1,13 @@
+
+spring:
+    activiti:
+        check-process-definitions: false
+        history-level: full
+        db-identity-used: false
+        database-schema-update: false
+    datasource:
+        driver-class-name: com.mysql.jdbc.Driver
+        url: jdbc:mysql://192.168.235.128:3306/activiti?characterEncoding=utf8&useSSL=false&nullCatalogMeansCurrent=true
+#        url: jdbc:mysql://127.0.0.1:3306/activiti2?characterEncoding=utf8&useSSL=false&nullCatalogMeansCurrent=true&serverTimezone=UTC
+        username: root
+        password: 123456

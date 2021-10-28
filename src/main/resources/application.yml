@@ -1,26 +1,12 @@
 logging:
     level:
-        com:
-            activiti6:
-                www:
-                    workflow: info
         root: debug
+        com.activiti6.www.workflow: info
 server:
     port: 8081
     servlet:
         context-path: /
 spring:
-    activiti:
-        check-process-definitions: false
-        history-level: full
-        db-identity-used: false
-        database-schema-update: false
-    datasource:
-        driver-class-name: com.mysql.jdbc.Driver
-#        url: jdbc:mysql://192.168.200.76:3306/activiti?characterEncoding=utf8&useSSL=false&nullCatalogMeansCurrent=true
-        url: jdbc:mysql://127.0.0.1:3306/activiti2?characterEncoding=utf8&useSSL=false&nullCatalogMeansCurrent=true&serverTimezone=UTC
-        password: root
-        username: root
     thymeleaf:
         cache: false
         check-template-location: true
@@ -29,3 +15,5 @@ spring:
         mode: LEGACYHTML5
         prefix: classpath:/static/
         suffix: .html
+    profiles:
+        active: dev
