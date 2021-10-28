@@ -7,6 +7,10 @@ server:
     servlet:
         context-path: /
 spring:
+    application:
+        name: workflow
+    profiles:
+        active: dev
     thymeleaf:
         cache: false
         check-template-location: true
@@ -15,5 +19,3 @@ spring:
         mode: LEGACYHTML5
         prefix: classpath:/static/
         suffix: .html
-    profiles:
-        active: dev
